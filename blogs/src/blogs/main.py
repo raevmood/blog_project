@@ -24,7 +24,7 @@ app.add_middleware(
         "https://social-blogging-app-mauve.vercel.app"  
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
