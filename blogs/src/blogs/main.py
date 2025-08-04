@@ -36,11 +36,6 @@ class BlogGenerationRequest(BaseModel):
 class FreestylePromptRequest(BaseModel):
     prompt: str
 
-app = FastAPI(
-    title="AI Social Blogging App Backend",
-    description="An API for generating blog posts using a CrewAI multi-agent system."
-)
-
 def get_prompt_formatter():
     return PromptFormatter(
         llm=ChatGoogleGenerativeAI(
@@ -51,7 +46,7 @@ def get_prompt_formatter():
 
 @app.get("/")
 def read_root():
-    return {"Hello": "World"}
+    return {"message": "AI Social Blogging App Backend is running!"}
 
 @app.post("/api/generate-blog-from-prompt", tags=["Blog Generation"])
 async def generate_blog_from_prompt(
@@ -112,8 +107,4 @@ async def generate_blog(request: BlogGenerationRequest):
         print(f"An error occurred: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred while running the crew: {e}")
-
-@app.get("/")
-def read_root():
-    return {"message": "AI Social Blogging App Backend is running!"}
 
