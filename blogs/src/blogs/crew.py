@@ -32,8 +32,8 @@ llm = LLM(
     api_key=GOOGLE_API_KEY,
     temperature=0.7,
     max_retries=3,
-    timeout=120, 
-    request_delay=2, 
+    timeout=120,  
+    request_delay=2,  
 )
 
 class BlogsCrew:
@@ -47,6 +47,11 @@ class BlogsCrew:
         
         try:
             self.rag_tool = MyCustomTool(api_key=GOOGLE_API_KEY)
+            if not self.rag_tool.is_available():
+                print("Warning: RAG tool initialized but knowledge base is not available")
+                self.rag_tool = None
+            else:
+                print("RAG tool initialized successfully with knowledge base")
         except Exception as e:
             print(f"Warning: RAG tool initialization failed: {e}")
             self.rag_tool = None
@@ -64,13 +69,12 @@ class BlogsCrew:
         """Apply rate limiting between API calls"""
         current_time = time.time()
         time_since_last_request = current_time - self.last_request_time
-        
+
         min_delay = 2.0
         if time_since_last_request < min_delay:
             sleep_time = min_delay - time_since_last_request
             print(f"Rate limiting: sleeping {sleep_time:.1f} seconds...")
             time.sleep(sleep_time)
-        
         if self.request_count > 0 and self.request_count % 5 == 0:
             backoff_time = min(10, self.request_count * 0.5)  # Max 10 seconds
             print(f"Progressive backoff: sleeping {backoff_time:.1f} seconds...")
@@ -109,6 +113,7 @@ class BlogsCrew:
             real-time trending information, recent news, and popular discussions around your topic.""",
             tools=researcher_tools
         )
+
         time.sleep(1)
         
         writer_tools = [self.rag_tool] if self.rag_tool else []
@@ -141,7 +146,6 @@ class BlogsCrew:
             goal='Create concise, compelling metadata and summaries that will help the blog post perform well on social media and search engines.',
             backstory="You are an expert in digital marketing and SEO who knows how to craft titles, descriptions, and hashtags that drive engagement and discoverability."
         )
-
         research_task = Task(
             description=f"""Research current trends and developments related to: {self.topic}
             
@@ -240,5 +244,5 @@ class BlogsCrew:
             process=Process.sequential,
             verbose=True,
             max_execution_time=300, 
-            memory=False
+            memory=False 
         )
