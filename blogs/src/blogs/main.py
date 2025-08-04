@@ -53,14 +53,24 @@ def parse_crew_result(result, topic: str) -> dict:
         if isinstance(result, dict):
             parsed_result = result
         elif isinstance(result, str):
-            json_match = re.search(r'{.*}', result.strip(), re.DOTALL)
+            cleaned_result = result.strip()
+            
+            if cleaned_result.startswith('```json') and cleaned_result.endswith('```'):
+                cleaned_result = cleaned_result[7:-3].strip()
+            elif cleaned_result.startswith('```') and cleaned_result.endswith('```'):
+                cleaned_result = cleaned_result[3:-3].strip()
+            json_match = re.search(r'{.*}', cleaned_result, re.DOTALL)
             if json_match:
                 try:
-                    parsed_result = json.loads(json_match.group())
-                except json.JSONDecodeError:
-                    parsed_result = {"full_content": result}
+                    json_str = json_match.group()
+                    json_str = json_str.replace('\n', ' ').replace('\\n', '\n')
+                    parsed_result = json.loads(json_str)
+                    print(f"Successfully parsed JSON with keys: {list(parsed_result.keys())}")
+                except json.JSONDecodeError as e:
+                    print(f"JSON parsing failed: {e}")
+                    parsed_result = {"full_content": cleaned_result}
             else:
-                parsed_result = {"full_content": result}
+                parsed_result = {"full_content": cleaned_result}
         else:
             parsed_result = {"full_content": str(result)}
 
@@ -72,7 +82,6 @@ def parse_crew_result(result, topic: str) -> dict:
             "hashtags": [],
             "full_content": None
         }
-
 
         field_mappings = {
             "seo_title": ["seo_title", "title", "headline"],
@@ -133,6 +142,7 @@ async def generate_blog_from_prompt(
         print(f"Received freestyle prompt: '{request.prompt}'")
         structured_input = formatter.format_prompt(request.prompt)
         print(f"Structured input: {structured_input}")
+
         crew_request = BlogGenerationRequest(
             topic=structured_input.topic,
             tone=structured_input.tone,
@@ -141,8 +151,8 @@ async def generate_blog_from_prompt(
 
         crew_result = await generate_blog_internal(crew_request)
         execution_time = time.time() - start_time
-        parsed_result = parse_crew_result(crew_result, structured_input.topic)
 
+        parsed_result = parse_crew_result(crew_result, structured_input.topic)
         response = {
             "result": parsed_result,
             "execution_time": execution_time,
