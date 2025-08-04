@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .crew import BlogsCrew
 from .prompt_parser import PromptFormatter
@@ -7,6 +8,25 @@ import traceback
 import asyncio
 import json
 import os
+
+
+app = FastAPI(
+    title="AI Social Blogging App Backend",
+    description="An API for generating blog posts using a CrewAI multi-agent system."
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8000",  
+        "http://localhost:5173", 
+        "https://blogproject-production-b8ce.up.railway.app",
+        "https://social-blogging-app-mauve.vercel.app"  
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 class BlogGenerationRequest(BaseModel):
     topic: str
