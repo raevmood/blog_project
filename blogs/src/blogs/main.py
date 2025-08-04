@@ -8,7 +8,8 @@ import traceback
 import asyncio
 import json
 import os
-
+import time
+import re
 
 app = FastAPI(
     title="AI Social Blogging App Backend",
@@ -44,6 +45,79 @@ def get_prompt_formatter():
         )
     )
 
+def parse_crew_result(result, topic: str) -> dict:
+    """
+    Parse and normalize the crew result into a consistent format
+    """
+    try:
+        if isinstance(result, dict):
+            parsed_result = result
+        elif isinstance(result, str):
+            json_match = re.search(r'{.*}', result.strip(), re.DOTALL)
+            if json_match:
+                try:
+                    parsed_result = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    parsed_result = {"full_content": result}
+            else:
+                parsed_result = {"full_content": result}
+        else:
+            parsed_result = {"full_content": str(result)}
+
+        normalized = {
+            "seo_title": None,
+            "title": None,
+            "meta_description": None,
+            "summary": None,
+            "hashtags": [],
+            "full_content": None
+        }
+
+
+        field_mappings = {
+            "seo_title": ["seo_title", "title", "headline"],
+            "title": ["title", "seo_title", "headline"],
+            "meta_description": ["meta_description", "description", "desc"],
+            "summary": ["summary", "brief", "overview"],
+            "hashtags": ["hashtags", "tags", "keywords"],
+            "full_content": ["full_content", "content", "blog_post", "article", "body"]
+        }
+
+        for norm_key, possible_keys in field_mappings.items():
+            for key in possible_keys:
+                if key in parsed_result and parsed_result[key]:
+                    normalized[norm_key] = parsed_result[key]
+                    break
+
+        if not any(normalized.values()):
+            normalized["full_content"] = str(result)
+            normalized["title"] = f"Blog Post: {topic}"
+
+        if not normalized["title"] and not normalized["seo_title"]:
+            normalized["title"] = f"Blog Post about {topic}"
+
+        if normalized["hashtags"] and isinstance(normalized["hashtags"], str):
+            hashtags_str = normalized["hashtags"]
+            if ',' in hashtags_str:
+                normalized["hashtags"] = [tag.strip() for tag in hashtags_str.split(',')]
+            elif '#' in hashtags_str:
+                normalized["hashtags"] = re.findall(r'#\w+', hashtags_str)
+            else:
+                normalized["hashtags"] = [hashtags_str]
+
+        return normalized
+
+    except Exception as e:
+        print(f"Error parsing crew result: {e}")
+        return {
+            "seo_title": f"Blog Post: {topic}",
+            "title": f"Blog Post: {topic}",
+            "meta_description": f"An informative blog post about {topic}",
+            "summary": "Generated blog content",
+            "hashtags": [f"#{topic.replace(' ', '')}"],
+            "full_content": str(result)
+        }
+
 @app.get("/")
 def read_root():
     return {"message": "AI Social Blogging App Backend is running!"}
@@ -53,58 +127,136 @@ async def generate_blog_from_prompt(
     request: FreestylePromptRequest,
     formatter: PromptFormatter = Depends(get_prompt_formatter)
 ):
+    start_time = time.time()
+    
     try:
         print(f"Received freestyle prompt: '{request.prompt}'")
         structured_input = formatter.format_prompt(request.prompt)
-
+        print(f"Structured input: {structured_input}")
         crew_request = BlogGenerationRequest(
             topic=structured_input.topic,
             tone=structured_input.tone,
             target_audience=structured_input.target_audience
         )
 
-        return await generate_blog(crew_request)
+        crew_result = await generate_blog_internal(crew_request)
+        execution_time = time.time() - start_time
+        parsed_result = parse_crew_result(crew_result, structured_input.topic)
+
+        response = {
+            "result": parsed_result,
+            "execution_time": execution_time,
+            "status": "success",
+            "metadata": {
+                "original_prompt": request.prompt,
+                "topic": structured_input.topic,
+                "tone": structured_input.tone,
+                "target_audience": structured_input.target_audience
+            }
+        }
+
+        print(f"Returning response with keys: {list(response.keys())}")
+        print(f"Result keys: {list(parsed_result.keys())}")
+        
+        return response
 
     except ValueError as ve:
-         raise HTTPException(status_code=400, detail=str(ve))
+        execution_time = time.time() - start_time
+        error_response = {
+            "result": None,
+            "execution_time": execution_time,
+            "status": "error",
+            "error": str(ve),
+            "error_type": "validation_error"
+        }
+        raise HTTPException(status_code=400, detail=error_response)
+        
     except Exception as e:
-        print(f"An error occurred during prompt formatting or crew execution: {e}")
+        execution_time = time.time() - start_time
+        print(f"An error occurred after {execution_time:.1f}s: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+        
+        error_response = {
+            "result": None,
+            "execution_time": execution_time,
+            "status": "error",
+            "error": str(e),
+            "error_type": "processing_error"
+        }
+        raise HTTPException(status_code=500, detail=error_response)
 
 @app.post("/api/generate-blog", tags=["Blog Generation"])
 async def generate_blog(request: BlogGenerationRequest):
+    """Public endpoint for direct blog generation"""
+    start_time = time.time()
+    
     try:
-        print(f"Received structured request to generate blog for topic: {request.topic}")
-        crew_setup = BlogsCrew(
-            topic=request.topic,
-            tone=request.tone,
-            target_audience=request.target_audience
+        crew_result = await generate_blog_internal(request)
+        execution_time = time.time() - start_time
+        
+        parsed_result = parse_crew_result(crew_result, request.topic)
+        
+        return {
+            "result": parsed_result,
+            "execution_time": execution_time,
+            "status": "success",
+            "metadata": {
+                "topic": request.topic,
+                "tone": request.tone,
+                "target_audience": request.target_audience
+            }
+        }
+        
+    except Exception as e:
+        execution_time = time.time() - start_time
+        print(f"An error occurred after {execution_time:.1f}s: {e}")
+        traceback.print_exc()
+        
+        error_response = {
+            "result": None,
+            "execution_time": execution_time,
+            "status": "error",
+            "error": str(e),
+            "error_type": "processing_error"
+        }
+        raise HTTPException(status_code=500, detail=error_response)
+
+async def generate_blog_internal(request: BlogGenerationRequest):
+    """Internal function for blog generation logic"""
+    print(f"Generating blog for topic: '{request.topic}', tone: '{request.tone}', audience: '{request.target_audience}'")
+    
+    crew_setup = BlogsCrew(
+        topic=request.topic,
+        tone=request.tone,
+        target_audience=request.target_audience
+    )
+
+    if not crew_setup.rag_tool and not crew_setup.serpapi_tool:
+        raise HTTPException(
+            status_code=500, 
+            detail="No knowledge tools available (RAG and SerpAPI failed)."
         )
 
-        if not crew_setup.rag_tool and not crew_setup.serpapi_tool:
-            raise HTTPException(status_code=500, detail="No knowledge tools available (RAG and SerpAPI failed).")
-
-        blog_crew = crew_setup.setup_crew()
+    blog_crew = crew_setup.setup_crew()
+    print("Starting crew execution...")
+    
+    try:
         result = await asyncio.to_thread(blog_crew.kickoff)
-
         print("Crew execution finished successfully.")
-
-        if isinstance(result, str):
-            try:
-                import re
-                json_match = re.search(r'{.*}', result.strip(), re.DOTALL)
-                if json_match:
-                    return json.loads(json_match.group())
-                return {"blog_post": result}
-            except json.JSONDecodeError:
-                print("Warning: Failed to parse final output as JSON. Returning as string.")
-                return {"blog_post": result}
-
+        print(f"Raw result type: {type(result)}")
+        print(f"Raw result preview: {str(result)[:200]}...")
+        
         return result
-
+        
     except Exception as e:
-        print(f"An error occurred: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"An error occurred while running the crew: {e}")
+        print(f"Crew execution failed: {e}")
+        raise e
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "AI Social Blogging App Backend",
+        "timestamp": time.time()
+    }
 
